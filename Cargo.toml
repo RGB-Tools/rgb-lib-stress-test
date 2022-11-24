@@ -1,0 +1,11 @@
+[package]
+name = "rgb-lib-stress-test"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitcoin = "0.28.1"
+rgb-lib = "0.1.5"
+time = { version = "0.3.13", features = ["std"] }
