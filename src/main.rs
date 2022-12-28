@@ -1,5 +1,6 @@
 mod regtest;
 mod rgb;
+mod search;
 
 use std::fs;
 use std::io::Write;
@@ -13,7 +14,8 @@ fn main() {
     // environment setup
     regtest::start_services();
 
-    let loops = 7;
+    let loops = 4;
+    let allocation_utxos = 2;
 
     let data_dir = "./data";
     let electrum_url = "tcp://localhost:50001";
@@ -21,10 +23,10 @@ fn main() {
     fs::create_dir_all(data_dir).unwrap();
 
     // RGB wallet 1 setup
-    println!("setting up wallet 1");
+    print!("setting up wallet 1");
     let keys_1 = generate_keys(BitcoinNetwork::Regtest);
     let fingerprint_1 = keys_1.xpub_fingerprint;
-    println!(" - fingerprint: {fingerprint_1}");
+    println!(", fingerprint: {fingerprint_1}, log: {data_dir}/{fingerprint_1}/log");
     let wallet_data_1 = WalletData {
         data_dir: data_dir.to_string(),
         bitcoin_network: BitcoinNetwork::Regtest,
@@ -40,13 +42,13 @@ fn main() {
     regtest::fund_wallet(&address, "0.001");
     regtest::mine();
     wallet_1
-        .create_utxos(online_1.clone(), true, Some(3), Some(1000))
+        .create_utxos(online_1.clone(), true, Some(allocation_utxos), Some(1000))
         .unwrap();
     // RGB wallet 2 setup
-    println!("setting up wallet 2");
+    print!("setting up wallet 2");
     let keys_2 = generate_keys(BitcoinNetwork::Regtest);
     let fingerprint_2 = keys_2.xpub_fingerprint;
-    println!(" - fingerprint: {fingerprint_2}");
+    println!(", fingerprint: {fingerprint_2}, log: {data_dir}/{fingerprint_2}/log");
     let wallet_data_2 = WalletData {
         data_dir: data_dir.to_string(),
         bitcoin_network: BitcoinNetwork::Regtest,
@@ -62,7 +64,7 @@ fn main() {
     regtest::fund_wallet(&address, "0.001");
     regtest::mine();
     wallet_2
-        .create_utxos(online_2.clone(), true, Some(3), Some(1000))
+        .create_utxos(online_2.clone(), true, Some(allocation_utxos), Some(1000))
         .unwrap();
 
     // RGB asset issuance
@@ -72,7 +74,13 @@ fn main() {
     // RGB asset send loop
     let amount = 10;
     let mut report_file = fs::File::create("report.csv").expect("file should have been created");
-    let report_header = "consignment size,total time,send,recv refresh 1,send refresh 1,recv refresh 2,send refresh 2\n";
+    let report_header = concat!(
+        "consignment size",
+        ",send,recv refresh 1,send refresh 1,recv refresh 2,send refresh 2",
+        ",recv validate,recv register,recv consume,send consume",
+        ",total time",
+        ",sender wallet\n",
+    );
     write_report_line(&mut report_file, report_header);
     for i in 0..loops {
         println!("[{i}] sending assets 1 -> 2");
