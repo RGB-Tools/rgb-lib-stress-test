@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 use time::OffsetDateTime;
 
-use rgb_lib::wallet::{AssetRgb20, Online, Recipient, TransferStatus, Wallet};
+use rgb_lib::wallet::{AssetRgb20, Online, Recipient, Wallet};
+use rgb_lib::TransferStatus;
 
 use crate::regtest;
 use crate::search;
