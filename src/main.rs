@@ -83,7 +83,7 @@ fn main() {
     );
     write_report_line(&mut report_file, report_header);
     for i in 0..loops {
-        println!("[{i}] sending assets 1 -> 2");
+        println!("\n[{i}] sending assets 1 -> 2");
         let result = rgb::send_assets(
             (&mut wallet_1, &online_1, &fingerprint_1),
             (&mut wallet_2, &online_2, &fingerprint_2),
@@ -92,7 +92,7 @@ fn main() {
             data_dir,
         );
         write_report_line(&mut report_file, &result);
-        println!("[{i}] sending assets 2 -> 1");
+        println!("\n[{i}] sending assets 2 -> 1");
         let result = rgb::send_assets(
             (&mut wallet_2, &online_2, &fingerprint_2),
             (&mut wallet_1, &online_1, &fingerprint_1),

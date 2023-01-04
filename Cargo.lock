@@ -3611,13 +3611,13 @@ dependencies = [
 [[package]]
 name = "rgb-core"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cd8efbe5924ce565619268193d6f86da052b51e60c17a53f67e927b41638b03"
+source = "git+https://github.com/zoedberg/rgb-core.git?branch=debug_consignment_validation#46609bdf4faca3360ebf8d97a661e2e5857589df"
 dependencies = [
  "aluvm",
  "amplify",
  "bitcoin",
  "bp-core",
+ "chrono",
  "commit_verify",
  "descriptor-wallet",
  "grin_secp256k1zkp",

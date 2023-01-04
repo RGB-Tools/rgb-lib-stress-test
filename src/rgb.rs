@@ -82,12 +82,12 @@ pub(crate) fn send_assets(
     // take transfers from WaitingCounterparty to Settled
     print!("  send[{}s] refreshing wallets:", t_send - t_begin);
     std::io::stdout().flush().unwrap();
-    print!(" recv");
+    println!(" recv");
     std::io::stdout().flush().unwrap();
     recver.0.refresh(recver.1.clone(), None, vec![]).unwrap();
     let t_ref_recv_1 = timestamp();
     print!("[{}]", t_ref_recv_1 - t_send);
-    print!(" send");
+    println!(" send");
     std::io::stdout().flush().unwrap();
     sender.0.refresh(sender.1.clone(), None, vec![]).unwrap();
     let t_ref_send_1 = timestamp();
@@ -96,12 +96,12 @@ pub(crate) fn send_assets(
     std::io::stdout().flush().unwrap();
     regtest::mine();
     let t_mine = timestamp();
-    print!(" recv");
+    println!(" recv");
     std::io::stdout().flush().unwrap();
     recver.0.refresh(recver.1.clone(), None, vec![]).unwrap();
     let t_ref_recv_2 = timestamp();
     print!("[{}]", t_ref_recv_2 - t_mine);
-    print!(" send");
+    println!(" send");
     std::io::stdout().flush().unwrap();
     sender.0.refresh(sender.1.clone(), None, vec![]).unwrap();
     let t_end = timestamp();
