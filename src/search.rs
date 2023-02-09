@@ -14,7 +14,7 @@ pub(crate) struct LogMatch {
 }
 
 fn get_datetime(datetime: &str) -> DateTime<FixedOffset> {
-    let rfc3339 = format!("{}:00", datetime);
+    let rfc3339 = format!("{datetime}:00");
     DateTime::parse_from_rfc3339(&rfc3339).unwrap()
 }
 
