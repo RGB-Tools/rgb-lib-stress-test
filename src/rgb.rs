@@ -44,14 +44,14 @@ fn get_consignment_size(consignment_path: &str) -> u64 {
     metadata.len()
 }
 
-pub(crate) fn issue_rgb20(wallet: &mut Wallet, online: &Online) -> AssetRgb20 {
+pub(crate) fn issue_rgb20(wallet: &mut Wallet, online: &Online, amount: u64) -> AssetRgb20 {
     wallet
         .issue_asset_rgb20(
             online.clone(),
             "TICKER".to_string(),
             "name".to_string(),
             0,
-            vec![1000],
+            vec![amount],
         )
         .unwrap()
 }
@@ -62,19 +62,22 @@ pub(crate) fn send_assets(
     asset_id: &str,
     amount: u64,
     data_dir: &str,
+    fee_rate: f32,
 ) -> String {
+    let consignment_endpoints = vec!["rgbhttpjsonrpc:http://localhost:3000/json-rpc".to_string()];
     let t_begin = timestamp();
-    let blind_data = recver.0.blind(None, None, None).unwrap();
+    let blind_data = recver.0.blind(None, None, None, consignment_endpoints.clone()).unwrap();
     let recipient_map = HashMap::from([(
         asset_id.to_string(),
         vec![Recipient {
             amount,
             blinded_utxo: blind_data.blinded_utxo.clone(),
+            consignment_endpoints,
         }],
     )]);
     let txid = sender
         .0
-        .send(sender.1.clone(), recipient_map, false)
+        .send(sender.1.clone(), recipient_map, false, fee_rate)
         .unwrap();
     let t_send = timestamp();
     assert!(!txid.is_empty());
@@ -113,11 +116,8 @@ pub(crate) fn send_assets(
     let (recv_con_time, recv_con_line_b, recv_con_line_e) = time_ops(&recv_log_path, Op::Consume);
     let send_log_path = get_log_path(data_dir, sender.2);
     let (send_con_time, send_con_line_b, send_con_line_e) = time_ops(&send_log_path, Op::Consume);
-    print!(
-        " -=recv validate[{}] recv register[{}] recv consume[{}] send consume[{}]=-",
-        recv_val_time, recv_reg_time, recv_con_time, send_con_time
-    );
-
+    print!(" -=recv validate[{recv_val_time}] recv register[{recv_reg_time}]");
+    print!(" recv consume[{recv_con_time}] send consume[{send_con_time}]=-");
     print!(" ...{}s total", t_end - t_begin);
 
     // check transfers
@@ -135,7 +135,7 @@ pub(crate) fn send_assets(
     assert_eq!(transfer_2.status, TransferStatus::Settled);
     let consignment_path = get_consignment_path(data_dir, sender.2, &txid, asset_id);
     let consignment_size = get_consignment_size(&consignment_path);
-    println!(" > consignment file size: {}", consignment_size);
+    println!(" > consignment file size: {consignment_size}");
     println!(
         "  - {}:{}-{} (receiver validate)",
         recver.2, recv_val_line_b, recv_val_line_e

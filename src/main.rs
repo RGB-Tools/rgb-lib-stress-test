@@ -15,11 +15,16 @@ fn main() {
     regtest::start_services();
 
     let loops = 4;
+
     let allocation_utxos = 2;
+    let utxo_size = 1000;
+
+    let issue_amount = 1000;
+    let send_amount = 10;
+    let fee_rate = 1.5;
 
     let data_dir = "./data";
     let electrum_url = "tcp://localhost:50001";
-    let proxy_url = "http://localhost:3000";
     fs::create_dir_all(data_dir).unwrap();
 
     // RGB wallet 1 setup
@@ -36,13 +41,13 @@ fn main() {
     };
     let mut wallet_1 = Wallet::new(wallet_data_1).unwrap();
     let online_1 = wallet_1
-        .go_online(true, electrum_url.to_string(), proxy_url.to_string())
+        .go_online(true, electrum_url.to_string())
         .unwrap();
     let address = wallet_1.get_address();
     regtest::fund_wallet(&address, "0.001");
     regtest::mine();
     wallet_1
-        .create_utxos(online_1.clone(), true, Some(allocation_utxos), Some(1000))
+        .create_utxos(online_1.clone(), true, Some(allocation_utxos), Some(utxo_size), fee_rate)
         .unwrap();
     // RGB wallet 2 setup
     print!("setting up wallet 2");
@@ -58,21 +63,20 @@ fn main() {
     };
     let mut wallet_2 = Wallet::new(wallet_data_2).unwrap();
     let online_2 = wallet_2
-        .go_online(true, electrum_url.to_string(), proxy_url.to_string())
+        .go_online(true, electrum_url.to_string())
         .unwrap();
     let address = wallet_2.get_address();
     regtest::fund_wallet(&address, "0.001");
     regtest::mine();
     wallet_2
-        .create_utxos(online_2.clone(), true, Some(allocation_utxos), Some(1000))
+        .create_utxos(online_2.clone(), true, Some(allocation_utxos), Some(utxo_size), fee_rate)
         .unwrap();
 
     // RGB asset issuance
     println!("issuing asset");
-    let asset = issue_rgb20(&mut wallet_1, &online_1);
+    let asset = issue_rgb20(&mut wallet_1, &online_1, issue_amount);
 
     // RGB asset send loop
-    let amount = 10;
     let mut report_file = fs::File::create("report.csv").expect("file should have been created");
     let report_header = concat!(
         "consignment size",
@@ -83,22 +87,24 @@ fn main() {
     );
     write_report_line(&mut report_file, report_header);
     for i in 0..loops {
-        println!("[{i}] sending assets 1 -> 2");
+        println!("\n[{i}] sending assets 1 -> 2");
         let result = rgb::send_assets(
             (&mut wallet_1, &online_1, &fingerprint_1),
             (&mut wallet_2, &online_2, &fingerprint_2),
             &asset.asset_id,
-            amount,
+            send_amount,
             data_dir,
+            fee_rate,
         );
         write_report_line(&mut report_file, &result);
-        println!("[{i}] sending assets 2 -> 1");
+        println!("\n[{i}] sending assets 2 -> 1");
         let result = rgb::send_assets(
             (&mut wallet_2, &online_2, &fingerprint_2),
             (&mut wallet_1, &online_1, &fingerprint_1),
             &asset.asset_id,
-            amount,
+            send_amount,
             data_dir,
+            fee_rate,
         );
         write_report_line(&mut report_file, &result);
     }
