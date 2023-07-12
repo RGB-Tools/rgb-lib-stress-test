@@ -15,6 +15,11 @@ use crate::scenarios::send_loop;
 fn main() -> Result<(), String> {
     // setup
     let opts = Opts::parse();
+    if !opts.force && opts.output.exists() {
+        return Err(
+            "Report file already exists, abrting. (run with --force to override)".to_string(),
+        );
+    }
     regtest::start_services();
     let data_dir = opts.data_dir.to_str().unwrap();
     fs::create_dir_all(data_dir).unwrap();

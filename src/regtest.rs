@@ -1,7 +1,7 @@
 use std::process::{Command, Stdio};
 
 pub(crate) fn start_services() {
-    println!("starting services...");
+    println!("start services");
     let status = Command::new("./services.sh")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -12,7 +12,7 @@ pub(crate) fn start_services() {
 }
 
 pub(crate) fn stop_services() {
-    println!("\nstopping services...");
+    println!("\nstop services");
     let status = Command::new("./services.sh")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

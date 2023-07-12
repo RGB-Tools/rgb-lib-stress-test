@@ -8,11 +8,11 @@ use std::time::Instant;
 use rgb_lib::wallet::{AssetRgb20, BlindData, Online, Recipient, Wallet};
 use rgb_lib::TransferStatus;
 
-use crate::constants::{CONSIGNMENT_ENDPOINT, FEE_RATE};
+use crate::constants::{FEE_RATE, TRANSPORT_ENDPOINT};
 use crate::regtest;
 
 /// Wrapper for rgb-lib wallet
-pub(crate) struct WalletInfo {
+pub(crate) struct WalletWrapper {
     wallet: RefCell<Wallet>,
     online: Online,
     fingerprint: String,
@@ -20,7 +20,7 @@ pub(crate) struct WalletInfo {
     asset_counter: u8,
 }
 
-impl Debug for WalletInfo {
+impl Debug for WalletWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let wallet_data = &self.wallet.borrow().get_wallet_data();
         f.debug_struct("WalletInfo")
@@ -38,14 +38,14 @@ impl Debug for WalletInfo {
     }
 }
 
-impl WalletInfo {
+impl WalletWrapper {
     pub(crate) fn new(
         wallet: Wallet,
         online: Online,
         fingerprint: String,
         wallet_index: u8,
     ) -> Self {
-        WalletInfo {
+        WalletWrapper {
             wallet: RefCell::new(wallet),
             online,
             fingerprint,
@@ -57,7 +57,7 @@ impl WalletInfo {
     pub(crate) fn send(
         &self,
         amount: u64,
-        recver: &WalletInfo,
+        recver: &WalletWrapper,
         asset_ids: &Vec<&str>,
     ) -> (String, HashMap<String, String>) {
         let mut map: HashMap<String, String> = HashMap::new();
@@ -70,7 +70,7 @@ impl WalletInfo {
                 vec![Recipient {
                     amount,
                     blinded_utxo: blind_data.blinded_utxo.to_string(),
-                    consignment_endpoints: vec![CONSIGNMENT_ENDPOINT.to_string()],
+                    transport_endpoints: vec![TRANSPORT_ENDPOINT.to_string()],
                 }],
             );
         }
@@ -92,7 +92,7 @@ impl WalletInfo {
     fn blind(&self) -> BlindData {
         self.wallet
             .borrow_mut()
-            .blind(None, None, None, vec![CONSIGNMENT_ENDPOINT.to_string()])
+            .blind(None, None, None, vec![TRANSPORT_ENDPOINT.to_string()])
             .unwrap()
     }
 
@@ -111,11 +111,19 @@ impl WalletInfo {
         }
     }
 
-    pub(crate) fn create_utxos(&self, num: Option<u8>, size: Option<u32>) {
+    pub(crate) fn create_utxos(&self, num: u8, size: u32) {
         self.wallet
             .borrow_mut()
-            .create_utxos(self.online.clone(), true, num, size, FEE_RATE)
+            .create_utxos(self.online.clone(), true, Some(num), Some(size), FEE_RATE)
             .unwrap();
+    }
+
+    pub(crate) fn fund(&self, amt: u32) {
+        let address = self.wallet.borrow().get_address();
+        let fund_amount = amt as f32 / 100_000_000f32;
+        regtest::fund_wallet(&address, &fund_amount.to_string());
+        regtest::mine();
+        std::thread::sleep(std::time::Duration::from_millis(1000));
     }
 
     pub(crate) fn show_unspents_with_allocations(&self) {
@@ -132,9 +140,9 @@ impl WalletInfo {
             let allocations = unspent.rgb_allocations;
             for allocation in allocations {
                 println!(
-                    "    asset ID: {}, amount: {}",
-                    allocation.asset_id.unwrap(),
-                    allocation.amount
+                    "    amount: {:4}, asset ID: {}",
+                    allocation.amount,
+                    allocation.asset_id.unwrap()
                 );
             }
         }
@@ -168,8 +176,8 @@ fn get_consignment_size(consignment_path: &str) -> u64 {
 }
 
 pub(crate) fn send_assets(
-    sender: &WalletInfo,
-    recver: &WalletInfo,
+    sender: &WalletWrapper,
+    recver: &WalletWrapper,
     asset_ids: &Vec<&str>,
     amount: u64,
 ) -> String {
@@ -233,7 +241,7 @@ pub(crate) fn send_assets(
     recver.check_transfer(map);
 
     format!(
-        "{},{},{},{},{},{},{},{},{}\n",
+        "\"{}\",\"{}\",{},{},{},{},{},{},{}\n",
         sender.fingerprint,
         recver.fingerprint,
         (t_send - t_begin).as_millis(),
