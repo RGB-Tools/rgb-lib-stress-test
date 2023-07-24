@@ -1,67 +1,129 @@
 # RGB transfer stress test using rgb-lib
 
-This is a script to test many subsequent transfers of the same RGB20 asset
-between two wallets. The consignment size and the time it takes to carry out
-the required operations is reported for each transfer. Times for some critical
-RGB operations are also reported.
+This is a CLI command to test a few scenarios involving transfers of RGB20
+assets between multiple wallets.
 
-The final output is saved to the `report.csv` file. Consignment file size is in
-bytes and times are in seconds.
+The time it takes to carry out the required operations and the size of the
+resulting consignment files is reported for each transfer.
+
+Times are in milliseconds and consignment sizes are in bytes.
+
+Multiple test scenarios are available and some parameters can be tweaked via
+cmdline options. See the next sections for details.
 
 ## Description
 
-The script will start local copies of the required services (bitcoind, electrs,
-proxy) in docker, setup two rgb-lib wallets, issue an asset using the first
-wallet, then send a small amount from wallet 1 to wallet 2 and back multiple
-times and finally stop the services.
+Upon command invocation, local copies of the required services (bitcoind,
+electrs, proxy) are started in docker, then each scenario sets up and executes
+its specific operations, optionally tuned via the given command-line options,
+and finally stops the services.
+
+A brief description of each scenario follows.
+
+### Send loop
+
+This scenario uses two wallets, issues an asset with the first one, then sends
+assets back and forth between the two wallets in loops.
+
+The number of loops can be tweaked via cmdline option.
+
+This extends the transition history, allowing to see the impact on transfer
+times and consignment sizes.
+
+### Merge histories
+
+This scenario uses six wallets. The first wallet is used to issue an asset to
+two allocations. Those allocations are sent to two other wallets. Each of these
+two wallets then sends assets back and forth between itself and another
+(initially empty) wallet in loops. Once the loops are completed the resulting
+allocations are sent from the two wallets holding them back to the first
+wallet, which in turn sends the sum of the two allocations to another (empty)
+wallet, thus merging the two transition histories up to the two issuance
+allocations. Finally, the resulting allocation (with merged histories) is sent
+back to the first wallet.
+
+The number of loops can be tweaked via cmdline option.
+
+This extends and then merges two transition histories, allowing to see the
+impact on transfer times and consignment sizes.
+
+### Merge UTXOs
+
+This scenario uses one wallet per asset, with one asset issued per wallet, plus
+a common (initially empty) receiver wallet and a final wallet with just one
+available UTXO. Assets are sent between each wallet and the common receiver in
+loops. The resulting allocations are then all sent to the final wallet, which
+aggregates them all to a single UTXO, and finally sent to the common receiver
+wallet.
+
+The number of assets and loops can be tweaked via cmdline options.
+
+### Random wallets
+
+This scenario uses four wallets by default. An asset is issued to the first
+wallet, then it is sent to a randomly-chosen wallet each time.
+
+The number of loops and wallets can be tweaked via cmdline options.
 
 ## Usage
 
-To run the test execute:
+Build the CLI with:
 ```sh
-cargo run
+cargo build --release
 ```
 
-The script will print basic info messages of the steps as they're carried out.
-Each transfer will print the current loop number and sender -> receiver wallet
-info, followed by the operation times (as they progress) and consignment
-size, followed by the wallet fingerprint and log line numbers where each of the
-timed operations start and end.
+Get the CLI help message with:
+```sh
+target/release/rgb-lib-stress-test -h
+```
 
-## Report format
+To run a test scenario with default options, add the test name. As an example:
+```sh
+target/release/rgb-lib-stress-test send-loop
+```
 
-The generated `report.csv` file contains the following columns:
-- consignment file size
-- rgb-lib send time (consignment is produced and posted to the proxy)
-- rgb-lib 1st refresh (receiver gets and validates consignment, posts ack)
-- rgb-lib 2nd refresh (sender gets ack, broadcasts tx)
-- rgb-lib 3rd refresh (receiver sees tx confirmed and completes transfer)
-- rgb-lib 4th refresh (sender sees tx confirmed and completes transfer)
-- rgb-core receiver contract validate (1st refresh)
-- rgb-node receiver contract register (1st refresh)
-- rgb-node receiver consume transfer (3rd refresh)
-- rgb-node sender consume transfer (4th refresh)
-- total time to complete the whole transfer
+The test will print info messages about the steps as they are carried out.
+Each transfer will print the sender -> receiver wallet fingerprints,
+followed by the operation times (as they progress), the total time taken by the
+whole transfer and the consignment size(s). Some scenarios also show the state
+of relevant wallet allocations.
+
+The steps for a transfer are:
+- send: creation of the transfer and sending of the consignment
+- refresh 1 (receiver): getting the consignment, validating and ACKing it
+- refresh 2 (sender): getting the consignment ACK and broadcasting the transaction
+- mining of a block
+- refresh 3 (receiver): settling the transfer once it has been confirmed
+- refresh 4 (sender): settling the transfer once it has been confirmed
+
+Refer to the help message of each scenario for the list of supported options.
+As an example:
+```sh
+target/release/rgb-lib-stress-test send-loop -h
+```
+
+Notes:
+- scenarios should work with default values, option tweaking is meant to
+  explore variants but this is not guaranteed to work and execution may panic
+- the wallet data directory is never cleaned up automatically
+- if the command execution crashes, services are not stopped (you can stop them
+  manually with `docker compose down`)
+
+## Report
+
+Each test run produces a report file in CSV format, containing one line for
+each transfer that has been carried out.
+
+The default file name is `report.csv` but a custom path can be specifed via
+cmdline option.
+
+The generated file contains the following columns:
 - fingerprint of the wallet acting as sender in the transfer
-
-## Length of operations
-
-The test shows the consignment size and send times growing with each transfer.
-
-To better locate where time is spent, rgb-lib calls to RGB APIs have been
-surrounded with logs that provide timestamps of operations start and stop.
-
-The operations taking longer to complete appear to be rgb-core's `validate` and
-rgb-node's `consume_transfer` and `register_contract`.
-
-The `validate` operations is carried out during the first receiver's refresh.
-It happens between the log lines `Validating consignment` and `Consignment
-validity`.
-
-The `register_contract` operations is carried out during the first receiver's
-refresh. It happens between the log lines `Registering contract` and `Contract
-registered`.
-
-The `consume_transfer` operation happens during the second refresh of both the
-receiver and sender. It happens between the log lines `Consuming RGB transfer`
-and `Consumed RGB transfer`.
+- fingerprint of the wallet acting as receiver in the transfer
+- rgb-lib send time
+- rgb-lib 1st refresh time
+- rgb-lib 2nd refresh time
+- rgb-lib 3rd refresh time
+- rgb-lib 4th refresh time
+- total time to complete the whole transfer
+- consignment file size(s)

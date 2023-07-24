@@ -12,7 +12,7 @@ pub(crate) fn start_services() {
 }
 
 pub(crate) fn stop_services() {
-    println!("stopping services...");
+    println!("\nstopping services...");
     let status = Command::new("./services.sh")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -23,10 +23,11 @@ pub(crate) fn stop_services() {
 }
 
 pub(crate) fn fund_wallet(address: &str, amount: &str) {
-    let status = Command::new("docker-compose")
+    let status = Command::new("docker")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .arg("compose")
         .args(_bitcoin_cli())
         .arg("-rpcwallet=miner")
         .arg("sendtoaddress")
@@ -38,10 +39,11 @@ pub(crate) fn fund_wallet(address: &str, amount: &str) {
 }
 
 pub(crate) fn mine() {
-    let status = Command::new("docker-compose")
+    let status = Command::new("docker")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .arg("compose")
         .args(_bitcoin_cli())
         .arg("-rpcwallet=miner")
         .arg("-generate")

@@ -7,12 +7,9 @@ _die() {
 }
 
 
-if which docker-compose >/dev/null; then
-    COMPOSE="docker-compose"
-elif docker compose >/dev/null; then
-    COMPOSE="docker compose"
-else
-    echo "could not locate docker compose command or plugin"
+COMPOSE="docker compose"
+if ! $COMPOSE >/dev/null; then
+    echo "could not call docker compose (hint: install docker compose plugin)"
     exit 1
 fi
 BCLI="$COMPOSE exec -T -u blits bitcoind bitcoin-cli -regtest"
@@ -22,6 +19,13 @@ start() {
     $COMPOSE down -v
     rm -rf $DATA_DIR
     mkdir -p $DATA_DIR
+    # see docker-compose.yml for the exposed ports
+    EXPOSED_PORTS=(3000 50001)
+    for port in "${EXPOSED_PORTS[@]}"; do
+        if [ -n "$(ss -HOlnt "sport = :$port")" ];then
+            _die "port $port is already bound, services can't be started"
+        fi
+    done
     $COMPOSE up -d
 
     # wait for bitcoind to be up

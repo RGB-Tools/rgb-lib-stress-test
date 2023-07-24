@@ -1,23 +1,154 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::Instant;
 
-use time::OffsetDateTime;
-
-use rgb_lib::wallet::{AssetRgb20, Online, Recipient, Wallet};
+use rgb_lib::wallet::{AssetRgb20, BlindData, Online, Recipient, Wallet};
 use rgb_lib::TransferStatus;
 
+use crate::constants::{CONSIGNMENT_ENDPOINT, FEE_RATE};
 use crate::regtest;
-use crate::search;
 
-const CONSUME_PATTERNS: (&str, &str) = ("Consuming RGB transfer", "Consumed RGB transfer");
-const REGISTER_PATTERNS: (&str, &str) = ("Registering contract", "Contract registered");
-const VALIDATE_PATTERNS: (&str, &str) = ("Validating consignment", "Consignment validity");
+/// Wrapper for rgb-lib wallet
+pub(crate) struct WalletInfo {
+    wallet: RefCell<Wallet>,
+    online: Online,
+    fingerprint: String,
+    wallet_index: u8,
+    asset_counter: u8,
+}
 
-enum Op {
-    Consume,
-    Register,
-    Validate,
+impl Debug for WalletInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let wallet_data = &self.wallet.borrow().get_wallet_data();
+        f.debug_struct("WalletInfo")
+            .field("data_dir", &wallet_data.data_dir)
+            .field("network", &wallet_data.bitcoin_network)
+            .field("pubkey", &wallet_data.pubkey)
+            .field(
+                "mnemnonic",
+                &wallet_data.mnemonic.clone().unwrap_or("".to_string()),
+            )
+            .field("fingerprint", &self.fingerprint)
+            .field("wallet_index", &self.wallet_index)
+            .field("asset_counter", &self.asset_counter)
+            .finish()
+    }
+}
+
+impl WalletInfo {
+    pub(crate) fn new(
+        wallet: Wallet,
+        online: Online,
+        fingerprint: String,
+        wallet_index: u8,
+    ) -> Self {
+        WalletInfo {
+            wallet: RefCell::new(wallet),
+            online,
+            fingerprint,
+            wallet_index,
+            asset_counter: 0,
+        }
+    }
+
+    pub(crate) fn send(
+        &self,
+        amount: u64,
+        recver: &WalletInfo,
+        asset_ids: &Vec<&str>,
+    ) -> (String, HashMap<String, String>) {
+        let mut map: HashMap<String, String> = HashMap::new();
+        let mut recipient_map = HashMap::new();
+        for asset_id in asset_ids {
+            let blind_data = recver.blind();
+            map.insert(asset_id.to_string(), blind_data.blinded_utxo.clone());
+            recipient_map.insert(
+                asset_id.to_string(),
+                vec![Recipient {
+                    amount,
+                    blinded_utxo: blind_data.blinded_utxo.to_string(),
+                    consignment_endpoints: vec![CONSIGNMENT_ENDPOINT.to_string()],
+                }],
+            );
+        }
+        let txid = self
+            .wallet
+            .borrow_mut()
+            .send(self.online.clone(), recipient_map, false, FEE_RATE)
+            .unwrap();
+        (txid, map)
+    }
+
+    fn refresh(&self) -> bool {
+        self.wallet
+            .borrow_mut()
+            .refresh(self.online.clone(), None, vec![])
+            .unwrap()
+    }
+
+    fn blind(&self) -> BlindData {
+        self.wallet
+            .borrow_mut()
+            .blind(None, None, None, vec![CONSIGNMENT_ENDPOINT.to_string()])
+            .unwrap()
+    }
+
+    fn check_transfer(&self, map: HashMap<String, String>) {
+        for (asset_id, blinded_utxo) in map {
+            let transfers = self
+                .wallet
+                .borrow_mut()
+                .list_transfers(asset_id.to_string())
+                .unwrap();
+            let transfer = transfers
+                .iter()
+                .find(|t| t.blinded_utxo == Some(blinded_utxo.to_string()))
+                .unwrap();
+            assert_eq!(transfer.status, TransferStatus::Settled);
+        }
+    }
+
+    pub(crate) fn create_utxos(&self, num: Option<u8>, size: Option<u32>) {
+        self.wallet
+            .borrow_mut()
+            .create_utxos(self.online.clone(), true, num, size, FEE_RATE)
+            .unwrap();
+    }
+
+    pub(crate) fn show_unspents_with_allocations(&self) {
+        let unspents = self.wallet.borrow_mut().list_unspents(true).unwrap();
+        for unspent in unspents {
+            let utxo = unspent.utxo;
+            if !utxo.colorable {
+                continue;
+            }
+            println!(
+                "- outpoint: {}, amount: {} sats",
+                utxo.outpoint, utxo.btc_amount
+            );
+            let allocations = unspent.rgb_allocations;
+            for allocation in allocations {
+                println!(
+                    "    asset ID: {}, amount: {}",
+                    allocation.asset_id.unwrap(),
+                    allocation.amount
+                );
+            }
+        }
+    }
+
+    /// Issue asset with unique name
+    pub(crate) fn issue_rgb20(&mut self, amounts: Vec<u64>) -> AssetRgb20 {
+        self.asset_counter += 1;
+        let ticker = format!("T{}{}", self.wallet_index, self.asset_counter);
+        self.wallet
+            .borrow_mut()
+            .issue_asset_rgb20(self.online.clone(), ticker, "name".to_string(), 0, amounts)
+            .unwrap()
+    }
 }
 
 fn get_consignment_path(data_dir: &str, fingerprint: &str, txid: &str, asset_id: &str) -> String {
@@ -31,161 +162,90 @@ fn get_consignment_path(data_dir: &str, fingerprint: &str, txid: &str, asset_id:
     consignment_path.to_string_lossy().to_string()
 }
 
-fn get_log_path(data_dir: &str, fingerprint: &str) -> String {
-    let mut consignment_path = PathBuf::new();
-    consignment_path.push(data_dir);
-    consignment_path.push(fingerprint);
-    consignment_path.push("log");
-    consignment_path.to_string_lossy().to_string()
-}
-
 fn get_consignment_size(consignment_path: &str) -> u64 {
     let metadata = std::fs::metadata(consignment_path).unwrap();
     metadata.len()
 }
 
-pub(crate) fn issue_rgb20(wallet: &mut Wallet, online: &Online, amount: u64) -> AssetRgb20 {
-    wallet
-        .issue_asset_rgb20(
-            online.clone(),
-            "TICKER".to_string(),
-            "name".to_string(),
-            0,
-            vec![amount],
-        )
-        .unwrap()
-}
-
 pub(crate) fn send_assets(
-    sender: (&mut Wallet, &Online, &str),
-    recver: (&mut Wallet, &Online, &str),
-    asset_id: &str,
+    sender: &WalletInfo,
+    recver: &WalletInfo,
+    asset_ids: &Vec<&str>,
     amount: u64,
-    data_dir: &str,
-    fee_rate: f32,
 ) -> String {
-    let consignment_endpoints = vec!["rgbhttpjsonrpc:http://localhost:3000/json-rpc".to_string()];
+    let data_dir = &sender.wallet.borrow().get_wallet_data().data_dir;
     let t_begin = timestamp();
-    let blind_data = recver.0.blind(None, None, None, consignment_endpoints.clone()).unwrap();
-    let recipient_map = HashMap::from([(
-        asset_id.to_string(),
-        vec![Recipient {
-            amount,
-            blinded_utxo: blind_data.blinded_utxo.clone(),
-            consignment_endpoints,
-        }],
-    )]);
-    let txid = sender
-        .0
-        .send(sender.1.clone(), recipient_map, false, fee_rate)
-        .unwrap();
+
+    let (txid, map) = sender.send(amount, recver, asset_ids);
     let t_send = timestamp();
     assert!(!txid.is_empty());
 
     // take transfers from WaitingCounterparty to Settled
-    print!("  send[{}s] refreshing wallets:", t_send - t_begin);
+    print!(
+        "  {}->{} send[{:6}] > refreshing:",
+        sender.fingerprint,
+        recver.fingerprint,
+        (t_send - t_begin).as_millis()
+    );
     std::io::stdout().flush().unwrap();
-    print!(" recv");
+    print!(" receiver");
     std::io::stdout().flush().unwrap();
-    recver.0.refresh(recver.1.clone(), None, vec![]).unwrap();
+    recver.refresh();
     let t_ref_recv_1 = timestamp();
-    print!("[{}]", t_ref_recv_1 - t_send);
-    print!(" send");
+    print!("[{:6}]", (t_ref_recv_1 - t_send).as_millis());
+    print!(", sender");
     std::io::stdout().flush().unwrap();
-    sender.0.refresh(sender.1.clone(), None, vec![]).unwrap();
+    sender.refresh();
     let t_ref_send_1 = timestamp();
-    print!("[{}]", t_ref_send_1 - t_ref_recv_1);
-    print!(" (mining)");
+    print!("[{:6}]", (t_ref_send_1 - t_ref_recv_1).as_millis());
+    print!(", mining");
     std::io::stdout().flush().unwrap();
     regtest::mine();
     let t_mine = timestamp();
-    print!(" recv");
+    print!(", receiver");
     std::io::stdout().flush().unwrap();
-    recver.0.refresh(recver.1.clone(), None, vec![]).unwrap();
+    recver.refresh();
     let t_ref_recv_2 = timestamp();
-    print!("[{}]", t_ref_recv_2 - t_mine);
-    print!(" send");
+    print!("[{:6}]", (t_ref_recv_2 - t_mine).as_millis());
+    print!(", sender");
     std::io::stdout().flush().unwrap();
-    sender.0.refresh(sender.1.clone(), None, vec![]).unwrap();
+    sender.refresh();
     let t_end = timestamp();
-    print!("[{}]", t_end - t_ref_recv_2);
+    print!("[{:6}]", (t_end - t_ref_recv_2).as_millis());
+    print!(" > {:6} total", (t_end - t_begin).as_millis());
+    std::io::stdout().flush().unwrap();
 
-    let recv_log_path = get_log_path(data_dir, recver.2);
-    let (recv_val_time, recv_val_line_b, recv_val_line_e) = time_ops(&recv_log_path, Op::Validate);
-    let (recv_reg_time, recv_reg_line_b, recv_reg_line_e) = time_ops(&recv_log_path, Op::Register);
-    let (recv_con_time, recv_con_line_b, recv_con_line_e) = time_ops(&recv_log_path, Op::Consume);
-    let send_log_path = get_log_path(data_dir, sender.2);
-    let (send_con_time, send_con_line_b, send_con_line_e) = time_ops(&send_log_path, Op::Consume);
-    print!(" -=recv validate[{recv_val_time}] recv register[{recv_reg_time}]");
-    print!(" recv consume[{recv_con_time}] send consume[{send_con_time}]=-");
-    print!(" ...{}s total", t_end - t_begin);
+    let mut consignment_sizes = Vec::with_capacity(asset_ids.clone().len());
+    for asset_id in asset_ids {
+        let consignment_path = get_consignment_path(data_dir, &sender.fingerprint, &txid, asset_id);
+        let consignment_size = get_consignment_size(&consignment_path);
+        consignment_sizes.push(consignment_size);
+    }
+    let consignment_str = consignment_sizes
+        .into_iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
+    println!(" > consignment sizes: {}", consignment_str);
 
-    // check transfers
-    let transfers_1 = sender.0.list_transfers(asset_id.to_string()).unwrap();
-    let transfer_1 = transfers_1
-        .iter()
-        .find(|t| t.blinded_utxo == Some(blind_data.blinded_utxo.clone()))
-        .unwrap();
-    assert_eq!(transfer_1.status, TransferStatus::Settled);
-    let transfers_2 = recver.0.list_transfers(asset_id.to_string()).unwrap();
-    let transfer_2 = transfers_2
-        .iter()
-        .find(|t| t.blinded_utxo == Some(blind_data.blinded_utxo.clone()))
-        .unwrap();
-    assert_eq!(transfer_2.status, TransferStatus::Settled);
-    let consignment_path = get_consignment_path(data_dir, sender.2, &txid, asset_id);
-    let consignment_size = get_consignment_size(&consignment_path);
-    println!(" > consignment file size: {consignment_size}");
-    println!(
-        "  - {}:{}-{} (receiver validate)",
-        recver.2, recv_val_line_b, recv_val_line_e
-    );
-    println!(
-        "  - {}:{}-{} (receiver register)",
-        recver.2, recv_reg_line_b, recv_reg_line_e
-    );
-    println!(
-        "  - {}:{}-{} (receiver consume)",
-        recver.2, recv_con_line_b, recv_con_line_e
-    );
-    println!(
-        "  - {}:{}-{} (sender consume)",
-        sender.2, send_con_line_b, send_con_line_e
-    );
+    // check transfers have settled
+    sender.check_transfer(map.clone());
+    recver.check_transfer(map);
+
     format!(
-        "{},{},{},{},{},{},{},{},{},{},{},{}\n",
-        consignment_size,
-        t_send - t_begin,
-        t_ref_recv_1 - t_send,
-        t_ref_send_1 - t_ref_recv_1,
-        t_ref_recv_2 - t_mine,
-        t_end - t_ref_recv_2,
-        recv_val_time,
-        recv_reg_time,
-        recv_con_time,
-        send_con_time,
-        t_end - t_begin,
-        sender.2,
+        "{},{},{},{},{},{},{},{},{}\n",
+        sender.fingerprint,
+        recver.fingerprint,
+        (t_send - t_begin).as_millis(),
+        (t_ref_recv_1 - t_send).as_millis(),
+        (t_ref_send_1 - t_ref_recv_1).as_millis(),
+        (t_ref_recv_2 - t_mine).as_millis(),
+        (t_end - t_ref_recv_2).as_millis(),
+        (t_end - t_begin).as_millis(),
+        consignment_str,
     )
 }
 
-fn time_ops(log_path: &str, op: Op) -> (i64, u64, u64) {
-    let begin_pat: &str;
-    let end_pat: &str;
-    match op {
-        Op::Consume => (begin_pat, end_pat) = CONSUME_PATTERNS,
-        Op::Register => (begin_pat, end_pat) = REGISTER_PATTERNS,
-        Op::Validate => (begin_pat, end_pat) = VALIDATE_PATTERNS,
-    }
-    let begins = search::grep_log(log_path, begin_pat);
-    let ends = search::grep_log(log_path, end_pat);
-
-    let begin = begins.last().unwrap();
-    let end = ends.last().unwrap();
-    let op_time = search::get_time_diff((begin.clone(), end.clone()));
-    (op_time, begin.line, end.line)
-}
-
-fn timestamp() -> i64 {
-    OffsetDateTime::now_utc().unix_timestamp()
+fn timestamp() -> Instant {
+    Instant::now()
 }

@@ -3,13 +3,7 @@ name = "rgb-lib-stress-test"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-bitcoin = "0.29.2"
-chrono = "0.4.23"
-grep-matcher = "0.1.5"
-grep-regex = "0.1.10"
-grep-searcher = "0.1.10"
-rgb-lib = "0.1.7"
-time = { version = "0.3.13", features = ["std"] }
+clap = { version = "4.3.0", features = ["derive", "env"] }
+rand = "0.8.5"
+rgb-lib = "0.1.9"
