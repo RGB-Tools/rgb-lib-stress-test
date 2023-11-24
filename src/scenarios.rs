@@ -80,7 +80,7 @@ pub(crate) fn send_loop(opts: Opts, loops: u16) {
         utxo_size,
         verbose: _,
     } = get_scenario_opts(opts);
-    let mut report_file = fs::File::create(&output).expect("file should have been created");
+    let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
 
     let mut wallet_1 = get_wallet(&data_dir, 1, utxos, utxo_size * loops as u32);
@@ -111,7 +111,7 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
         utxo_size,
         verbose,
     } = get_scenario_opts(opts);
-    let mut report_file = fs::File::create(&output).expect("file should have been created");
+    let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
 
     println!("\nsetup wallets");
@@ -184,7 +184,7 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
         utxo_size,
         verbose,
     } = get_scenario_opts(opts);
-    let mut report_file = fs::File::create(&output).expect("file should have been created");
+    let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
 
     println!("\nsetup wallets and issue assets");
@@ -266,7 +266,7 @@ pub(crate) fn random_wallets(opts: Opts, loops: u16, num_wallets: u8) {
         utxo_size,
         verbose: _,
     } = get_scenario_opts(opts);
-    let mut report_file = fs::File::create(&output).expect("file should have been created");
+    let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
 
     println!("\nsetup wallets");
