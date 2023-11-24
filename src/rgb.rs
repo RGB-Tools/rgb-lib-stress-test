@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Write;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Instant;
 
-use rgb_lib::wallet::{AssetRgb20, BlindData, Online, Recipient, Wallet};
-use rgb_lib::TransferStatus;
+use rgb_lib::wallet::{AssetNIA, Online, ReceiveData, Recipient, RecipientData, Wallet};
+use rgb_lib::{SecretSeal, TransferStatus};
 
-use crate::constants::{FEE_RATE, TRANSPORT_ENDPOINT};
+use crate::constants::{FEE_RATE, MIN_CONFIRMATIONS, TRANSPORT_ENDPOINT};
 use crate::regtest;
 
 /// Wrapper for rgb-lib wallet
@@ -63,13 +64,15 @@ impl WalletWrapper {
         let mut map: HashMap<String, String> = HashMap::new();
         let mut recipient_map = HashMap::new();
         for asset_id in asset_ids {
-            let blind_data = recver.blind();
-            map.insert(asset_id.to_string(), blind_data.blinded_utxo.clone());
+            let receive_data = recver.blind();
+            map.insert(asset_id.to_string(), receive_data.recipient_id.clone());
+            let secret_seal = SecretSeal::from_str(receive_data.recipient_id.as_str()).unwrap();
+            let recipient_data = RecipientData::BlindedUTXO(secret_seal);
             recipient_map.insert(
                 asset_id.to_string(),
                 vec![Recipient {
                     amount,
-                    blinded_utxo: blind_data.blinded_utxo.to_string(),
+                    recipient_data,
                     transport_endpoints: vec![TRANSPORT_ENDPOINT.to_string()],
                 }],
             );
@@ -77,7 +80,13 @@ impl WalletWrapper {
         let txid = self
             .wallet
             .borrow_mut()
-            .send(self.online.clone(), recipient_map, false, FEE_RATE)
+            .send(
+                self.online.clone(),
+                recipient_map,
+                false,
+                FEE_RATE,
+                MIN_CONFIRMATIONS,
+            )
             .unwrap();
         (txid, map)
     }
@@ -89,10 +98,16 @@ impl WalletWrapper {
             .unwrap()
     }
 
-    fn blind(&self) -> BlindData {
+    fn blind(&self) -> ReceiveData {
         self.wallet
             .borrow_mut()
-            .blind(None, None, None, vec![TRANSPORT_ENDPOINT.to_string()])
+            .blind_receive(
+                None,
+                None,
+                None,
+                vec![TRANSPORT_ENDPOINT.to_string()],
+                MIN_CONFIRMATIONS,
+            )
             .unwrap()
     }
 
@@ -101,11 +116,11 @@ impl WalletWrapper {
             let transfers = self
                 .wallet
                 .borrow_mut()
-                .list_transfers(asset_id.to_string())
+                .list_transfers(Some(asset_id.to_string()))
                 .unwrap();
             let transfer = transfers
                 .iter()
-                .find(|t| t.blinded_utxo == Some(blinded_utxo.to_string()))
+                .find(|t| t.recipient_id == Some(blinded_utxo.to_string()))
                 .unwrap();
             assert_eq!(transfer.status, TransferStatus::Settled);
         }
@@ -119,7 +134,7 @@ impl WalletWrapper {
     }
 
     pub(crate) fn fund(&self, amt: u32) {
-        let address = self.wallet.borrow().get_address();
+        let address = self.wallet.borrow().get_address().unwrap();
         let fund_amount = amt as f32 / 100_000_000f32;
         regtest::fund_wallet(&address, &fund_amount.to_string());
         regtest::mine();
@@ -127,7 +142,11 @@ impl WalletWrapper {
     }
 
     pub(crate) fn show_unspents_with_allocations(&self) {
-        let unspents = self.wallet.borrow_mut().list_unspents(true).unwrap();
+        let unspents = self
+            .wallet
+            .borrow_mut()
+            .list_unspents(Some(self.online.clone()), true)
+            .unwrap();
         for unspent in unspents {
             let utxo = unspent.utxo;
             if !utxo.colorable {
@@ -149,12 +168,12 @@ impl WalletWrapper {
     }
 
     /// Issue asset with unique name
-    pub(crate) fn issue_rgb20(&mut self, amounts: Vec<u64>) -> AssetRgb20 {
+    pub(crate) fn issue_nia(&mut self, amounts: Vec<u64>) -> AssetNIA {
         self.asset_counter += 1;
         let ticker = format!("T{}{}", self.wallet_index, self.asset_counter);
         self.wallet
             .borrow_mut()
-            .issue_asset_rgb20(self.online.clone(), ticker, "name".to_string(), 0, amounts)
+            .issue_asset_nia(self.online.clone(), ticker, "name".to_string(), 0, amounts)
             .unwrap()
     }
 }

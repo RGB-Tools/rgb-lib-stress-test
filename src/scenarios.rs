@@ -2,7 +2,7 @@ use rand::prelude::*;
 use std::fs;
 use std::io::Write;
 
-use crate::constants::{ELECTRUM_URL, FEE_AMT};
+use crate::constants::{ELECTRUM_URL, FEE_AMT, MAX_ALLOCATIONS_PER_UTXO};
 use crate::opts::Opts;
 use crate::rgb;
 use crate::rgb::WalletWrapper;
@@ -40,6 +40,8 @@ fn get_wallet(data_dir: &str, wallet_index: u8, utxo_num: u8, utxo_size: u32) ->
         database_type: DatabaseType::Sqlite,
         pubkey: keys.xpub,
         mnemonic: Some(keys.mnemonic),
+        max_allocations_per_utxo: MAX_ALLOCATIONS_PER_UTXO,
+        vanilla_keychain: None,
     };
     let mut wallet = Wallet::new(wallet_data).unwrap();
     let online = wallet.go_online(true, ELECTRUM_URL.to_string()).unwrap();
@@ -86,7 +88,7 @@ pub(crate) fn send_loop(opts: Opts, loops: u16) {
 
     // RGB asset issuance
     println!("issuing asset");
-    let asset = wallet_1.issue_rgb20(vec![send_amount]);
+    let asset = wallet_1.issue_nia(vec![send_amount]);
 
     // RGB asset send loop
     println!("\nsend loops");
@@ -122,7 +124,7 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
 
     // issue asset and split between initial pair of wallets
     println!("\nissue asset (2 allocations)");
-    let asset = wallets[0].issue_rgb20(vec![send_amount, send_amount]);
+    let asset = wallets[0].issue_nia(vec![send_amount, send_amount]);
     let asset_id = asset.asset_id;
     println!("asset ID: {}", asset_id.as_str());
     let asset_id_str = asset_id.as_str();
@@ -190,7 +192,7 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
     let mut asset_ids = Vec::with_capacity(num_assets as usize);
     for i in 0..num_assets {
         let mut wallet = get_wallet(&data_dir, i, utxos, utxo_size * loops as u32);
-        let asset = wallet.issue_rgb20(vec![send_amount]);
+        let asset = wallet.issue_nia(vec![send_amount]);
 
         issue_wallets.push(wallet);
         asset_ids.push(asset.asset_id);
@@ -275,7 +277,7 @@ pub(crate) fn random_wallets(opts: Opts, loops: u16, num_wallets: u8) {
     }
 
     println!("\nissue asset");
-    let asset = wallets[0].issue_rgb20(vec![send_amount]);
+    let asset = wallets[0].issue_nia(vec![send_amount]);
     let asset_ids = vec![asset.asset_id.as_str()];
 
     println!("\nsend assets to randomly-selected wallets");
