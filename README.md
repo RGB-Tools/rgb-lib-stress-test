@@ -65,6 +65,18 @@ wallet, then it is sent to a randomly-chosen wallet each time.
 
 The number of loops and wallets can be tweaked via command-line options.
 
+### Random transfers
+
+This scenario uses multiple wallets and multiple assets, both four by default.
+Each asset is issued to a random wallet. Assets are then sent between wallets
+in loops. On each loop a random wallet having spendable balance is selected as
+sender and another random wallet is selected as receiver, then a random
+fraction of the spendable balance is transferred between the two. Funds are
+added and UTXOs created as needed in order to complete the transfers.
+
+The number of assets, number loops, maximum allocations per UTXO and number of
+wallets can be tweaked via command-line options.
+
 ## Usage
 
 Build the CLI with:

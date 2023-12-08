@@ -7,7 +7,7 @@ mod scenarios;
 use std::fs;
 
 use clap::Parser;
-use scenarios::{merge_histories, merge_utxos, random_wallets};
+use scenarios::{merge_histories, merge_utxos, random_transfers, random_wallets};
 
 use crate::opts::Opts;
 use crate::scenarios::send_loop;
@@ -15,6 +15,14 @@ use crate::scenarios::send_loop;
 fn main() -> Result<(), String> {
     // setup
     let opts = Opts::parse();
+    if !matches!(opts.command, crate::opts::Command::RandomTransfers { .. })
+        && opts.allocation_utxos == 1
+    {
+        return Err(
+            "invalid value '1' for '--allocation_utxos <ALLOCATION_UTXOS>': valid range 2..255"
+                .to_string(),
+        );
+    }
     if !opts.force && opts.output.exists() {
         return Err(
             "Report file already exists, abrting. (run with --force to override)".to_string(),
@@ -30,6 +38,12 @@ fn main() -> Result<(), String> {
         opts::Command::MergeHistories { loops } => merge_histories(opts, loops),
         opts::Command::MergeUtxos { assets, loops } => merge_utxos(opts, assets, loops),
         opts::Command::RandomWallets { loops, wallets } => random_wallets(opts, loops, wallets),
+        opts::Command::RandomTransfers {
+            wallets,
+            assets,
+            max_allocations_per_utxo,
+            loops,
+        } => random_transfers(opts, wallets, assets, max_allocations_per_utxo, loops),
     };
 
     // teardown

@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::constants::DEFAULT_MAX_ALLOCATIONS_PER_UTXO;
+
 #[derive(Parser, Clone, PartialEq, Eq, Debug)]
 #[clap(name = "rgb_lib_stress_test", bin_name = "rgb_lib_stress_test")]
 pub struct Opts {
@@ -15,7 +17,7 @@ pub struct Opts {
 
     /// Number of wallet allocation UTXOs to be created
     #[clap(short, long, default_value_t = 5)]
-    #[arg(value_parser = clap::value_parser!(u8).range(2..))]
+    #[arg(value_parser = clap::value_parser!(u8).range(1..))]
     pub allocation_utxos: u8,
 
     /// Size, in satoshis, of wallet allocation UTXOs
@@ -77,6 +79,29 @@ pub enum Command {
     /// `loops` times
     RandomWallets {
         /// Number of loops (1-65535)
+        #[clap(short, long, default_value_t = 16)]
+        #[arg(value_parser = clap::value_parser!(u16).range(1..))]
+        loops: u16,
+
+        /// Number of wallets (2-255)
+        #[clap(short, long, default_value_t = 4)]
+        #[arg(value_parser = clap::value_parser!(u8).range(2..))]
+        wallets: u8,
+    },
+
+    /// Randomly issues and transfers assets between random wallets.
+    RandomTransfers {
+        /// Number of total assets (1-255)
+        #[clap(short, long, default_value_t = 4)]
+        #[arg(value_parser = clap::value_parser!(u8).range(1..))]
+        assets: u8,
+
+        /// Maximum number of allocations per UTXO
+        #[clap(short, long, default_value_t = DEFAULT_MAX_ALLOCATIONS_PER_UTXO)]
+        #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+        max_allocations_per_utxo: u32,
+
+        /// Number of total transfers (1-65535)
         #[clap(short, long, default_value_t = 16)]
         #[arg(value_parser = clap::value_parser!(u16).range(1..))]
         loops: u16,

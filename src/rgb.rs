@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
 
-use rgb_lib::wallet::{AssetNIA, Online, ReceiveData, Recipient, RecipientData, Wallet};
-use rgb_lib::{SecretSeal, TransferStatus};
+use rgb_lib::wallet::{AssetNIA, Assets, Online, ReceiveData, Recipient, RecipientData, Wallet};
+use rgb_lib::{Error, SecretSeal, TransferStatus};
 
 use crate::constants::{FEE_RATE, MIN_CONFIRMATIONS, TRANSPORT_ENDPOINT};
 use crate::regtest;
@@ -39,6 +39,11 @@ impl Debug for WalletWrapper {
     }
 }
 
+pub(crate) enum TestMode {
+    HandleUtxoErrors { utxos: u8, utxo_size: u32 },
+    NoErrorHandling,
+}
+
 impl WalletWrapper {
     pub(crate) fn new(
         wallet: Wallet,
@@ -55,16 +60,17 @@ impl WalletWrapper {
         }
     }
 
-    pub(crate) fn send(
+    fn send(
         &self,
         amount: u64,
         recver: &WalletWrapper,
         asset_ids: &Vec<&str>,
+        test_mode: &TestMode,
     ) -> (String, HashMap<String, String>) {
         let mut map: HashMap<String, String> = HashMap::new();
         let mut recipient_map = HashMap::new();
         for asset_id in asset_ids {
-            let receive_data = recver.blind();
+            let receive_data = recver.blind_receive(test_mode);
             map.insert(asset_id.to_string(), receive_data.recipient_id.clone());
             let secret_seal = SecretSeal::from_str(receive_data.recipient_id.as_str()).unwrap();
             let recipient_data = RecipientData::BlindedUTXO(secret_seal);
@@ -77,17 +83,26 @@ impl WalletWrapper {
                 }],
             );
         }
-        let txid = self
-            .wallet
-            .borrow_mut()
-            .send(
+        let txid = loop {
+            let send_res = self.wallet.borrow_mut().send(
                 self.online.clone(),
-                recipient_map,
+                recipient_map.clone(),
                 false,
                 FEE_RATE,
                 MIN_CONFIRMATIONS,
-            )
-            .unwrap();
+            );
+            match test_mode {
+                TestMode::HandleUtxoErrors { utxos, utxo_size } => match send_res {
+                    Ok(res) => break res,
+                    Err(err) => {
+                        self.add_funds_utxos_on_error(err, utxos, utxo_size, false);
+                    }
+                },
+                TestMode::NoErrorHandling => {
+                    break send_res.unwrap();
+                }
+            }
+        };
         (txid, map)
     }
 
@@ -98,17 +113,27 @@ impl WalletWrapper {
             .unwrap()
     }
 
-    fn blind(&self) -> ReceiveData {
-        self.wallet
-            .borrow_mut()
-            .blind_receive(
+    fn blind_receive(&self, test_mode: &TestMode) -> ReceiveData {
+        loop {
+            let blind_res = self.wallet.borrow_mut().blind_receive(
                 None,
                 None,
                 None,
                 vec![TRANSPORT_ENDPOINT.to_string()],
                 MIN_CONFIRMATIONS,
-            )
-            .unwrap()
+            );
+            match test_mode {
+                TestMode::HandleUtxoErrors { utxos, utxo_size } => match blind_res {
+                    Ok(res) => return res,
+                    Err(err) => {
+                        self.add_funds_utxos_on_error(err, utxos, utxo_size, true);
+                    }
+                },
+                TestMode::NoErrorHandling => {
+                    break blind_res.unwrap();
+                }
+            }
+        }
     }
 
     fn check_transfer(&self, map: HashMap<String, String>) {
@@ -126,10 +151,10 @@ impl WalletWrapper {
         }
     }
 
-    pub(crate) fn create_utxos(&self, num: u8, size: u32) {
+    pub(crate) fn create_utxos(&self, num: u8, size: u32, up_to: bool) {
         self.wallet
             .borrow_mut()
-            .create_utxos(self.online.clone(), true, Some(num), Some(size), FEE_RATE)
+            .create_utxos(self.online.clone(), up_to, Some(num), Some(size), FEE_RATE)
             .unwrap();
     }
 
@@ -168,13 +193,56 @@ impl WalletWrapper {
     }
 
     /// Issue asset with unique name
-    pub(crate) fn issue_nia(&mut self, amounts: Vec<u64>) -> AssetNIA {
+    pub(crate) fn issue_nia(&mut self, amounts: Vec<u64>, test_mode: &TestMode) -> AssetNIA {
         self.asset_counter += 1;
         let ticker = format!("T{}{}", self.wallet_index, self.asset_counter);
-        self.wallet
-            .borrow_mut()
-            .issue_asset_nia(self.online.clone(), ticker, "name".to_string(), 0, amounts)
-            .unwrap()
+        loop {
+            let issue_res = self.wallet.borrow_mut().issue_asset_nia(
+                self.online.clone(),
+                ticker.clone(),
+                "name".to_string(),
+                0,
+                amounts.clone(),
+            );
+            match test_mode {
+                TestMode::HandleUtxoErrors { utxos, utxo_size } => match issue_res {
+                    Ok(asset) => return asset,
+                    Err(err) => {
+                        self.add_funds_utxos_on_error(err, utxos, utxo_size, true);
+                    }
+                },
+                TestMode::NoErrorHandling => {
+                    return issue_res.unwrap();
+                }
+            }
+        }
+    }
+
+    fn add_funds_utxos_on_error(
+        &self,
+        err: Error,
+        utxos: &u8,
+        utxo_size: &u32,
+        create_utxos_up_to: bool,
+    ) {
+        match err {
+            Error::InsufficientBitcoins { needed, .. } => {
+                self.fund(needed as u32 * 5);
+                // sync
+                _ = self
+                    .wallet
+                    .borrow()
+                    .list_unspents(Some(self.online.clone()), true);
+            }
+            Error::InsufficientAllocationSlots => {
+                self.create_utxos(*utxos, *utxo_size, create_utxos_up_to);
+            }
+            _ => panic!("Unexpected error: {err}"),
+        }
+    }
+
+    pub(crate) fn list_assets(&self) -> Assets {
+        self.wallet.borrow_mut().list_assets(Vec::new()).unwrap()
     }
 }
 
@@ -199,11 +267,12 @@ pub(crate) fn send_assets(
     recver: &WalletWrapper,
     asset_ids: &Vec<&str>,
     amount: u64,
+    test_mode: &TestMode,
 ) -> String {
     let data_dir = &sender.wallet.borrow().get_wallet_data().data_dir;
     let t_begin = timestamp();
 
-    let (txid, map) = sender.send(amount, recver, asset_ids);
+    let (txid, map) = sender.send(amount, recver, asset_ids, test_mode);
     let t_send = timestamp();
     assert!(!txid.is_empty());
 
