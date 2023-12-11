@@ -319,9 +319,6 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
     }
 
     println!("\nspend all assets (single UTXO)");
-    // create 1 more UTXO as rgb-lib needs one even if there's no change
-    merger.fund(utxo_size + FEE_AMT);
-    merger.create_utxos(1, utxo_size, true);
     if verbose {
         println!("\nmerger wallet unspents (single UTXO) and related allocations");
         merger.show_unspents_with_allocations();
