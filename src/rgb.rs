@@ -84,7 +84,7 @@ impl WalletWrapper {
             );
         }
         let txid = loop {
-            let send_res = self.wallet.borrow_mut().send(
+            let send_res = self.wallet.borrow().send(
                 self.online.clone(),
                 recipient_map.clone(),
                 false,
@@ -108,14 +108,14 @@ impl WalletWrapper {
 
     fn refresh(&self) -> bool {
         self.wallet
-            .borrow_mut()
+            .borrow()
             .refresh(self.online.clone(), None, vec![])
             .unwrap()
     }
 
     fn blind_receive(&self, test_mode: &TestMode) -> ReceiveData {
         loop {
-            let blind_res = self.wallet.borrow_mut().blind_receive(
+            let blind_res = self.wallet.borrow().blind_receive(
                 None,
                 None,
                 None,
@@ -140,7 +140,7 @@ impl WalletWrapper {
         for (asset_id, blinded_utxo) in map {
             let transfers = self
                 .wallet
-                .borrow_mut()
+                .borrow()
                 .list_transfers(Some(asset_id.to_string()))
                 .unwrap();
             let transfer = transfers
@@ -153,7 +153,7 @@ impl WalletWrapper {
 
     pub(crate) fn create_utxos(&self, num: u8, size: u32, up_to: bool) {
         self.wallet
-            .borrow_mut()
+            .borrow()
             .create_utxos(self.online.clone(), up_to, Some(num), Some(size), FEE_RATE)
             .unwrap();
     }
@@ -169,7 +169,7 @@ impl WalletWrapper {
     pub(crate) fn show_unspents_with_allocations(&self) {
         let unspents = self
             .wallet
-            .borrow_mut()
+            .borrow()
             .list_unspents(Some(self.online.clone()), true)
             .unwrap();
         for unspent in unspents {
@@ -197,7 +197,7 @@ impl WalletWrapper {
         self.asset_counter += 1;
         let ticker = format!("T{}{}", self.wallet_index, self.asset_counter);
         loop {
-            let issue_res = self.wallet.borrow_mut().issue_asset_nia(
+            let issue_res = self.wallet.borrow().issue_asset_nia(
                 self.online.clone(),
                 ticker.clone(),
                 "name".to_string(),
@@ -242,7 +242,7 @@ impl WalletWrapper {
     }
 
     pub(crate) fn list_assets(&self) -> Assets {
-        self.wallet.borrow_mut().list_assets(Vec::new()).unwrap()
+        self.wallet.borrow().list_assets(Vec::new()).unwrap()
     }
 }
 
