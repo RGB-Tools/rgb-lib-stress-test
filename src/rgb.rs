@@ -7,9 +7,9 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use rgb_lib::wallet::{AssetNIA, Assets, Online, ReceiveData, Recipient, RecipientData, Wallet};
-use rgb_lib::{Error, SecretSeal, TransferStatus};
+use rgb_lib::{Error, ScriptBuf, SecretSeal, TransferStatus};
 
-use crate::constants::{FEE_RATE, MIN_CONFIRMATIONS, TRANSPORT_ENDPOINT};
+use crate::constants::{FEE_RATE, MIN_CONFIRMATIONS, TRANSPORT_ENDPOINT, WITNESS_SATS};
 use crate::regtest;
 
 /// Wrapper for rgb-lib wallet
@@ -66,14 +66,26 @@ impl WalletWrapper {
         recver: &WalletWrapper,
         asset_ids: &Vec<&str>,
         test_mode: &TestMode,
+        witness: bool,
     ) -> (String, HashMap<String, String>) {
         let mut map: HashMap<String, String> = HashMap::new();
         let mut recipient_map = HashMap::new();
         for asset_id in asset_ids {
-            let receive_data = recver.blind_receive(test_mode);
+            let (receive_data, recipient_data) = if witness {
+                let witness_recv_data = recver.witness_receive();
+                let witness_data = RecipientData::WitnessData {
+                    script_buf: ScriptBuf::from_hex(&witness_recv_data.recipient_id).unwrap(),
+                    amount_sat: WITNESS_SATS as u64,
+                    blinding: None,
+                };
+                (witness_recv_data, witness_data)
+            } else {
+                let blind_recv_data = recver.blind_receive(test_mode);
+                let secret_seal = SecretSeal::from_str(&blind_recv_data.recipient_id).unwrap();
+                let blinded_data = RecipientData::BlindedUTXO(secret_seal);
+                (blind_recv_data, blinded_data)
+            };
             map.insert(asset_id.to_string(), receive_data.recipient_id.clone());
-            let secret_seal = SecretSeal::from_str(receive_data.recipient_id.as_str()).unwrap();
-            let recipient_data = RecipientData::BlindedUTXO(secret_seal);
             recipient_map.insert(
                 asset_id.to_string(),
                 vec![Recipient {
@@ -136,7 +148,20 @@ impl WalletWrapper {
         }
     }
 
-    fn check_transfer(&self, map: HashMap<String, String>) {
+    fn witness_receive(&self) -> ReceiveData {
+        self.wallet
+            .borrow_mut()
+            .witness_receive(
+                None,
+                None,
+                None,
+                vec![TRANSPORT_ENDPOINT.to_string()],
+                MIN_CONFIRMATIONS,
+            )
+            .unwrap()
+    }
+
+    fn check_transfer(&self, map: &HashMap<String, String>) {
         for (asset_id, blinded_utxo) in map {
             let transfers = self
                 .wallet
@@ -265,26 +290,30 @@ fn get_consignment_size(consignment_path: &str) -> u64 {
 pub(crate) fn send_assets(
     sender: &WalletWrapper,
     recver: &WalletWrapper,
-    asset_ids: &Vec<&str>,
+    assets: &[(String, String)],
     amount: u64,
     test_mode: &TestMode,
+    witness: bool,
 ) -> String {
     let data_dir = &sender.wallet.borrow().get_wallet_data().data_dir;
-    let t_begin = timestamp();
 
-    let (txid, map) = sender.send(amount, recver, asset_ids, test_mode);
+    print!("  {}->{} ", sender.fingerprint, recver.fingerprint);
+    std::io::stdout().flush().unwrap();
+
+    let asset_ids = assets
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect::<Vec<&str>>();
+    let t_begin = timestamp();
+    let (txid, map) = sender.send(amount, recver, &asset_ids, test_mode, witness);
     let t_send = timestamp();
     assert!(!txid.is_empty());
 
     // take transfers from WaitingCounterparty to Settled
     print!(
-        "  {}->{} send[{:6}] > refreshing:",
-        sender.fingerprint,
-        recver.fingerprint,
+        "send[{:6}] > refreshing: receiver",
         (t_send - t_begin).as_millis()
     );
-    std::io::stdout().flush().unwrap();
-    print!(" receiver");
     std::io::stdout().flush().unwrap();
     recver.refresh();
     let t_ref_recv_1 = timestamp();
@@ -310,34 +339,54 @@ pub(crate) fn send_assets(
     print!("[{:6}]", (t_end - t_ref_recv_2).as_millis());
     print!(" > {:6} total", (t_end - t_begin).as_millis());
     std::io::stdout().flush().unwrap();
+    print!(" {}", if witness { "w" } else { "b" });
+    std::io::stdout().flush().unwrap();
 
-    let mut consignment_sizes = Vec::with_capacity(asset_ids.clone().len());
-    for asset_id in asset_ids {
+    // ticker, consignment size and recipient ID
+    let mut sent_asset_info: Vec<(String, String, String)> =
+        Vec::with_capacity(asset_ids.clone().len());
+    for (asset_id, asset_ticker) in assets {
         let consignment_path = get_consignment_path(data_dir, &sender.fingerprint, &txid, asset_id);
         let consignment_size = get_consignment_size(&consignment_path);
-        consignment_sizes.push(consignment_size);
+        sent_asset_info.push((
+            asset_ticker.to_string(),
+            consignment_size.to_string(),
+            map[asset_id].to_string(),
+        ))
     }
-    let consignment_str = consignment_sizes
-        .into_iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>()
-        .join(", ");
-    println!(" > consignment sizes: {}", consignment_str);
+
+    println!(
+        " assets: {}",
+        sent_asset_info
+            .iter()
+            .map(|(ticker, cons_size, _)| format!("{ticker}:{cons_size}"))
+            .collect::<Vec<String>>()
+            .join(" ")
+    );
+
+    let ticker_size_id_strs = sent_asset_info
+        .iter()
+        .map(|(ticker, cons_size, rcpt_id)| format!("{ticker},{cons_size},{rcpt_id}"))
+        .collect::<Vec<String>>();
+
+    let consignment_str = ticker_size_id_strs.join(",");
 
     // check transfers have settled
-    sender.check_transfer(map.clone());
-    recver.check_transfer(map);
+    sender.check_transfer(&map);
+    recver.check_transfer(&map);
 
     format!(
-        "\"{}\",\"{}\",{},{},{},{},{},{},{}\n",
+        "\"{}\",\"{}\",{},{},{},{},{},{},{},{},{}\n",
         sender.fingerprint,
         recver.fingerprint,
+        if witness { "witness" } else { "blind" },
         (t_send - t_begin).as_millis(),
         (t_ref_recv_1 - t_send).as_millis(),
         (t_ref_send_1 - t_ref_recv_1).as_millis(),
         (t_ref_recv_2 - t_mine).as_millis(),
         (t_end - t_ref_recv_2).as_millis(),
         (t_end - t_begin).as_millis(),
+        txid,
         consignment_str,
     )
 }

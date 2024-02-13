@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use crate::constants::DEFAULT_MAX_ALLOCATIONS_PER_UTXO;
+use crate::constants::{DEFAULT_MAX_ALLOCATIONS_PER_UTXO, MIN_TX_SATS, WITNESS_SATS};
 
 #[derive(Parser, Clone, PartialEq, Eq, Debug)]
 #[clap(name = "rgb_lib_stress_test", bin_name = "rgb_lib_stress_test")]
@@ -21,7 +21,7 @@ pub struct Opts {
     pub allocation_utxos: u8,
 
     /// Size, in satoshis, of wallet allocation UTXOs
-    #[clap(short, long, default_value_t = 1000)]
+    #[clap(short, long, default_value_t = WITNESS_SATS + MIN_TX_SATS)]
     #[arg(value_parser = clap::value_parser!(u32).range(294..))]
     pub utxo_size: u32,
 
@@ -37,6 +37,10 @@ pub struct Opts {
     /// Enable verbose output
     #[clap(short, long, action)]
     pub verbose: bool,
+
+    /// Enable receiving via witness
+    #[clap(short, long, action)]
+    pub witness: bool,
 
     #[clap(subcommand)]
     pub command: Command,

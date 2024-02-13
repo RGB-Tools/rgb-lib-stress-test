@@ -97,8 +97,11 @@ cargo run -q -- send-loop
 The test will print info messages about the steps as they are carried out.
 Each transfer will print the sender -> receiver wallet fingerprints, followed
 by the operation times (as they progress), the total time taken by the whole
-transfer and the consignment size(s). If the `--verbose` command-line options
-is set, some scenarios also show the state of relevant wallet allocations.
+transfer, then either "b" or "w" letter representing "blind" or
+"witness" respectively indicating the send mode for the
+transfer, then the ticker of the asset(s) being transferred and their
+consignment size(s). If the `--verbose` command-line options is set, some
+scenarios also show the state of relevant wallet allocations.
 
 The steps for a transfer are:
 - send: creation of the transfer and sending of the consignment
@@ -107,6 +110,12 @@ The steps for a transfer are:
 - mining of a block
 - refresh 3 (receiver): settling the transfer once it has been confirmed
 - refresh 4 (sender): settling the transfer once it has been confirmed
+
+By default, the transfers are done using blinded UTXOs. The global option
+`--witness` will instead make transfers use witness transactions for all
+scenarios except for `random-wallets` and `random-transfers`. These two
+scenarios will select randomly between blinded UTXO or witness transaction if
+the `--witness` option is selected.
 
 Refer to the help message of each scenario for the list of supported options.
 As an example:
@@ -141,10 +150,15 @@ command-line option.
 The generated file contains the following columns:
 - fingerprint of the wallet acting as sender in the transfer
 - fingerprint of the wallet acting as receiver in the transfer
+- "blind" or "witness" send mode
 - rgb-lib send time
 - rgb-lib 1st refresh time
 - rgb-lib 2nd refresh time
 - rgb-lib 3rd refresh time
 - rgb-lib 4th refresh time
 - total time to complete the whole transfer
-- consignment file size(s)
+- transaction ID
+For each asset the following three columns are added:
+- asset ticker
+- asset consignment size
+- asset recipient ID

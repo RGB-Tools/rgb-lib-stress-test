@@ -17,6 +17,7 @@ struct ScenarioOpts {
     utxo_num: u8,
     utxo_size: u32,
     verbose: bool,
+    witness: bool,
 }
 
 fn get_scenario_opts(opts: Opts) -> ScenarioOpts {
@@ -27,6 +28,7 @@ fn get_scenario_opts(opts: Opts) -> ScenarioOpts {
         utxo_num: opts.allocation_utxos,
         utxo_size: opts.utxo_size,
         verbose: opts.verbose,
+        witness: opts.witness,
     }
 }
 
@@ -66,9 +68,11 @@ fn write_report_header(report_file: &mut fs::File) {
     let report_header = concat!(
         "sender",
         ",receiver",
+        ",send mode",
         ",send,recv refresh 1,send refresh 1,recv refresh 2,send refresh 2",
         ",total time",
-        ",consignment sizes\n",
+        ",txid",
+        ",ticker,consignment size,recipient id\n",
     );
     write_report_line(report_file, report_header);
 }
@@ -87,6 +91,7 @@ pub(crate) fn send_loop(opts: Opts, loops: u16) {
         utxo_num: utxos,
         utxo_size,
         verbose: _,
+        witness,
     } = get_scenario_opts(opts);
     let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
@@ -100,23 +105,25 @@ pub(crate) fn send_loop(opts: Opts, loops: u16) {
 
     // RGB asset send loop
     println!("\nsend loops");
-    let asset_ids = vec![asset.asset_id.as_str()];
+    let assets = vec![(asset.asset_id, asset.ticker)];
     for i in 1..=loops {
         println!("loop {i}/{loops}");
         let result = rgb::send_assets(
             &wallet_1,
             &wallet_2,
-            &asset_ids,
+            &assets,
             send_amount,
             &TestMode::NoErrorHandling,
+            witness,
         );
         write_report_line(&mut report_file, &result);
         let result = rgb::send_assets(
             &wallet_2,
             &wallet_1,
-            &asset_ids,
+            &assets,
             send_amount,
             &TestMode::NoErrorHandling,
+            witness,
         );
         write_report_line(&mut report_file, &result);
     }
@@ -130,6 +137,7 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
         utxo_num: utxos,
         utxo_size,
         verbose,
+        witness,
     } = get_scenario_opts(opts);
     let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
@@ -145,26 +153,26 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
     // issue asset and split between initial pair of wallets
     println!("\nissue asset (2 allocations)");
     let asset = wallets[0].issue_nia(vec![send_amount, send_amount], &TestMode::NoErrorHandling);
-    let asset_id = asset.asset_id;
-    println!("asset ID: {}", asset_id.as_str());
-    let asset_id_str = asset_id.as_str();
-    let asset_ids = vec![asset_id_str];
+    println!("asset ID: {}", &asset.asset_id);
+    let assets = vec![(asset.asset_id, asset.ticker)];
 
     println!("\nsend issued assets to 2 empty wallets");
     let result = rgb::send_assets(
         &wallets[0],
         &wallets[1],
-        &asset_ids,
+        &assets,
         send_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
     let result = rgb::send_assets(
         &wallets[0],
         &wallets[2],
-        &asset_ids,
+        &assets,
         send_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
 
@@ -176,17 +184,19 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
             let result = rgb::send_assets(
                 wallet_pair.0,
                 wallet_pair.1,
-                &asset_ids,
+                &assets,
                 send_amount,
                 &TestMode::NoErrorHandling,
+                witness,
             );
             write_report_line(&mut report_file, &result);
             let result = rgb::send_assets(
                 wallet_pair.1,
                 wallet_pair.0,
-                &asset_ids,
+                &assets,
                 send_amount,
                 &TestMode::NoErrorHandling,
+                witness,
             );
             write_report_line(&mut report_file, &result);
         }
@@ -199,17 +209,19 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
     let result = rgb::send_assets(
         wallet_last_1,
         &wallets[0],
-        &asset_ids,
+        &assets,
         send_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
     let result = rgb::send_assets(
         wallet_last_2,
         &wallets[0],
-        &asset_ids,
+        &assets,
         send_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
 
@@ -220,9 +232,10 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
     let result = rgb::send_assets(
         &wallets[0],
         &wallets[5],
-        &asset_ids,
+        &assets,
         merge_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
 
@@ -231,9 +244,10 @@ pub(crate) fn merge_histories(opts: Opts, loops: u16) {
     let result = rgb::send_assets(
         &wallets[5],
         &wallets[0],
-        &asset_ids,
+        &assets,
         merge_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
 
@@ -251,19 +265,20 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
         utxo_num: utxos,
         utxo_size,
         verbose,
+        witness,
     } = get_scenario_opts(opts);
     let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
 
     println!("\nsetup wallets and issue assets");
     let mut issue_wallets = Vec::with_capacity(num_assets as usize);
-    let mut asset_ids = Vec::with_capacity(num_assets as usize);
+    let mut assets: Vec<(String, String)> = Vec::with_capacity(num_assets as usize);
     for i in 0..num_assets {
         let mut wallet = get_wallet(&data_dir, i, utxos, utxo_size * loops as u32, None);
         let asset = wallet.issue_nia(vec![send_amount], &TestMode::NoErrorHandling);
 
         issue_wallets.push(wallet);
-        asset_ids.push(asset.asset_id);
+        assets.push((asset.asset_id.clone(), asset.ticker.clone()));
     }
 
     // create state transition history for wallets
@@ -279,21 +294,23 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
         println!("loop {i}/{loops}");
         for j in 0..num_assets {
             let sender = &issue_wallets[j as usize];
-            let asset_id = vec![asset_ids[j as usize].as_str()];
+            let asset = vec![assets[j as usize].clone()];
             let result = rgb::send_assets(
                 sender,
                 &receiver,
-                &asset_id,
+                &asset,
                 send_amount,
                 &TestMode::NoErrorHandling,
+                witness,
             );
             write_report_line(&mut report_file, &result);
             let result = rgb::send_assets(
                 &receiver,
                 sender,
-                &asset_id,
+                &asset,
                 send_amount,
                 &TestMode::NoErrorHandling,
+                witness,
             );
             write_report_line(&mut report_file, &result);
         }
@@ -311,9 +328,10 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
         let result = rgb::send_assets(
             &issue_wallets[i as usize],
             &merger,
-            &vec![asset_ids[i as usize].as_str()],
+            &[assets[i as usize].clone()],
             send_amount,
             &TestMode::NoErrorHandling,
+            witness,
         );
         write_report_line(&mut report_file, &result);
     }
@@ -326,9 +344,10 @@ pub(crate) fn merge_utxos(opts: Opts, num_assets: u8, loops: u16) {
     let result = rgb::send_assets(
         &merger,
         &receiver,
-        &asset_ids.iter().map(|a| a.as_str()).collect(),
+        &assets,
         send_amount,
         &TestMode::NoErrorHandling,
+        witness,
     );
     write_report_line(&mut report_file, &result);
 
@@ -346,6 +365,7 @@ pub(crate) fn random_wallets(opts: Opts, loops: u16, num_wallets: u8) {
         utxo_num: utxos,
         utxo_size,
         verbose: _,
+        witness,
     } = get_scenario_opts(opts);
     let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
@@ -359,11 +379,16 @@ pub(crate) fn random_wallets(opts: Opts, loops: u16, num_wallets: u8) {
 
     println!("\nissue asset");
     let asset = wallets[0].issue_nia(vec![send_amount], &TestMode::NoErrorHandling);
-    let asset_ids = vec![asset.asset_id.as_str()];
+    let asset = vec![(asset.asset_id, asset.ticker)];
 
     println!("\nsend assets to randomly-selected wallets");
     let mut last_index = 0;
     let len = loops.to_string().len();
+    let mut rngthrd = if witness {
+        Some(rand::thread_rng())
+    } else {
+        None
+    };
     for i in 1..=loops {
         let mut index = rand::thread_rng().gen_range(0..num_wallets as usize);
         while index == last_index {
@@ -373,9 +398,14 @@ pub(crate) fn random_wallets(opts: Opts, loops: u16, num_wallets: u8) {
         let result = rgb::send_assets(
             &wallets[last_index],
             &wallets[index],
-            &asset_ids,
+            &asset,
             send_amount,
             &TestMode::NoErrorHandling,
+            if let Some(rng) = rngthrd.as_mut() {
+                rng.gen_bool(0.5)
+            } else {
+                false
+            },
         );
         last_index = index;
         write_report_line(&mut report_file, &result);
@@ -396,12 +426,14 @@ pub(crate) fn random_transfers(
         utxo_num: utxos,
         utxo_size,
         verbose: _,
+        witness,
     } = get_scenario_opts(opts);
     let do_handle_errors = &TestMode::HandleUtxoErrors { utxos, utxo_size };
     let mut report_file = fs::File::create(output).expect("file should have been created");
     write_report_header(&mut report_file);
 
     println!("\nsetup {num_wallets} wallets");
+    let mut rng = rand::thread_rng();
     let mut wallets: Vec<WalletWrapper> = Vec::with_capacity(num_wallets as usize);
     for i in 0..num_wallets {
         let wallet = get_wallet(
@@ -418,7 +450,7 @@ pub(crate) fn random_transfers(
     std::io::stdout().flush().unwrap();
     let mut asset_ids: Vec<AssetNIA> = Vec::new();
     for _i in 0..num_assets {
-        let wallet_index = rand::thread_rng().gen_range(0..wallets.len());
+        let wallet_index = rng.gen_range(0..wallets.len());
         let new_asset = wallets[wallet_index].issue_nia(vec![send_amount], do_handle_errors);
         print!(" {},", new_asset.ticker);
         std::io::stdout().flush().unwrap();
@@ -428,51 +460,51 @@ pub(crate) fn random_transfers(
     println!("\ntransfers");
     let len = loops.to_string().len();
     for i in 1..=loops {
-        let mut sender: Option<&WalletWrapper> = None;
-        let mut asset_id: Option<String> = None;
-        let mut asset_balance: Option<u64> = None;
-        let mut sender_index = usize::MAX;
-        while sender.is_none() {
-            sender_index = rand::thread_rng().gen_range(0..wallets.len());
-            let wallet = &wallets[sender_index];
-            let wallet_assets = wallet.list_assets();
-            let wallet_rgb20_assets = wallet_assets.nia.unwrap();
-            for rgb20_asset in wallet_rgb20_assets.iter() {
-                if rgb20_asset.balance.spendable > 0 {
-                    sender = Some(wallet);
-                    asset_id = Some(rgb20_asset.asset_id.clone());
-                    asset_balance = Some(rgb20_asset.balance.spendable);
-                    break;
-                }
-            }
-        }
-        if sender.is_none() {
-            unreachable!("There should be at least one wallet with assets.")
-        }
+        let mut wallet_indexes: Vec<usize> = (0..wallets.len()).collect();
+        wallet_indexes.shuffle(&mut rng);
+        let has_spendable = |i: &usize| {
+            wallets[*i]
+                .list_assets()
+                .nia
+                .unwrap()
+                .iter()
+                .any(|a| a.balance.spendable > 0)
+        };
+        let sender_index_pos = wallet_indexes
+            .iter()
+            .position(has_spendable)
+            .expect("at least one wallet must have spendable assets");
+        let sender = &wallets[wallet_indexes[sender_index_pos]];
+        wallet_indexes.remove(sender_index_pos);
+        let receiver_index = wallet_indexes.pop().expect("wallet should be available");
+        let receiver = &wallets[receiver_index];
 
-        let mut receiver = None;
-        while receiver.is_none() {
-            let receiver_index = rand::thread_rng().gen_range(0..wallets.len());
-            if sender_index == receiver_index {
-                continue;
-            }
-            let wallet = &wallets[receiver_index];
-            receiver = Some(wallet);
-        }
+        let sender_nia_assets = sender.list_assets().nia.unwrap();
+        let mut spendable_assets: Vec<&AssetNIA> = sender_nia_assets
+            .iter()
+            .filter(|asset| asset.balance.spendable > 0)
+            .collect();
+
+        spendable_assets.shuffle(&mut rng);
+        let asset = spendable_assets
+            .pop()
+            .expect("spendable asset should be available");
+        let asset_balance = asset.balance.spendable;
 
         print!("[{i:len$}/{loops}] ");
         std::io::stdout().flush().unwrap();
 
         let p = rand::thread_rng().gen_range(1..=10);
-        let balance_frac = asset_balance.unwrap() / p;
+        let balance_frac = asset_balance / p;
         let tx_amount = cmp::max(1, balance_frac);
 
         let result = rgb::send_assets(
-            sender.unwrap(),
-            receiver.unwrap(),
-            &vec![asset_id.as_ref().expect("ID should be present").as_str()],
+            sender,
+            receiver,
+            &[(asset.asset_id.clone(), asset.ticker.clone())],
             tx_amount,
             do_handle_errors,
+            if witness { rng.gen_bool(0.5) } else { false },
         );
 
         write_report_line(&mut report_file, result.as_str());

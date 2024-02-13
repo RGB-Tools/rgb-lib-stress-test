@@ -7,6 +7,7 @@ mod scenarios;
 use std::fs;
 
 use clap::Parser;
+use constants::{MIN_TX_SATS, WITNESS_SATS};
 use scenarios::{merge_histories, merge_utxos, random_transfers, random_wallets};
 
 use crate::opts::Opts;
@@ -22,6 +23,14 @@ fn main() -> Result<(), String> {
             "invalid value '1' for '--allocation_utxos <ALLOCATION_UTXOS>': valid range 2..255"
                 .to_string(),
         );
+    }
+    if opts.witness && (opts.utxo_size < (WITNESS_SATS + MIN_TX_SATS)) {
+        return Err(format!(
+            "invalid value '{}' for '--utxo-size <UTXO_SIZE>': \
+            must be equal or higher than {} when '--witness' option is selected",
+            opts.utxo_size,
+            WITNESS_SATS + MIN_TX_SATS
+        ));
     }
     if !opts.force && opts.output.exists() {
         return Err(
